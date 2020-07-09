@@ -5,7 +5,7 @@ persistent escrow : Address;
 persistent start : UInt64;
 persistent buyerOk : Bool;
 persistent sellerOk: Bool;
-persistent settledAtBlock: UInt64;
+persistent settledSinceBlock: UInt64;
 
 
 @init
@@ -17,7 +17,7 @@ function init(owner: Address)
     use start;
     use buyerOk;
     use sellerOk;
-    use settledAtBlock;
+    use settledSinceBlock;
 
     var context = getContext();
     var tx: Transaction = context.transaction();
@@ -34,7 +34,7 @@ function init(owner: Address)
     start.set(context.block().blockNumber());
     buyerOk.set(false);
     sellerOk.set(false);
-    settledAtBlock.set(18446744073709551615u64);
+    settledSinceBlock.set(18446744073709551615u64);
 endfunction
 
 
@@ -48,7 +48,7 @@ function accept()
     use start;
     use buyerOk;
     use sellerOk;
-    use settledAtBlock;
+    use settledSinceBlock;
 
     var context = getContext();
     var tx: Transaction = context.transaction();
@@ -105,7 +105,7 @@ function cancel()
     use seller;
     use buyerOk;
     use sellerOk;
-    use settledAtBlock;
+    use settledSinceBlock;
 
     var context = getContext();
     var tx: Transaction = context.transaction();
@@ -135,6 +135,21 @@ function kill()
 endfunction
 
 
+@action
+function withdrawExcessBalance()
+    use balance;
+    use escrow;
+
+    authoriseTx();
+
+    var contract_balance = balance();
+    var bonded_balance = balance.get();
+    assert(contract_balance >= bonded_balance, "INCONSISTENCY: Insufficient contract balance.");
+
+    transfer(escrow.get(), contract_balance - bonded_balance);
+endfunction
+
+
 @query
 function balance() : UInt64
     use balance;
@@ -151,7 +166,7 @@ function status() : StructuredData
     use start;
     use buyerOk;
     use sellerOk;
-    use settledAtBlock;
+    use settledSinceBlock;
 
     var status = StructuredData();
     status.set("balance", balance.get());
@@ -161,7 +176,7 @@ function status() : StructuredData
     status.set("start", start.get());
     status.set("buyerOk", buyerOk.get());
     status.set("sellerOk", sellerOk.get());
-    status.set("settledAtBlock", settledAtBlock.get());
+    status.set("settledSinceBlock", settledSinceBlock.get());
 
     return status;
 endfunction
@@ -172,6 +187,7 @@ endfunction
 
 function payBalance()
     // we are sending ourselves (contract creator) a fee
+    use balance;
     use seller
     use escrow;
 
@@ -181,25 +197,30 @@ function payBalance()
     transfer(escrow.get(), fee);
     transfer(seller.get(), amountPayable);
     balance.set(0u64);
+
+    selfdestruct();
 endfunction
 
 function selfdestruct()
     use balance;
     use buyer;
-    use settledAtBlock;
+    use settledSinceBlock;
 
-    transfer(buyer.get(), balance.get());
-    balance.set(0u64);
-    settledAtBlock.set(getContext.block().blockNumber());
+    if (balance.get() > 0u64)
+        transfer(buyer.get(), balance.get());
+        balance.set(0u64);
+    endif
+
+    settledSinceBlock.set(getContext.block().blockNumber());
 endfunction
 
 function _isActive() : Bool
-    use settledAtBlock;
-    return (getContext.block().blockNumber() < settledAtBlock.get());
+    use settledSinceBlock;
+    return (getContext.block().blockNumber() < settledSinceBlock.get());
 endfunction
 
 function verifyIsActive()
-    use settledAtBlock;
+    use settledSinceBlock;
     assert(_isActive(), "Contract has been settled and is no more active.");
 endfunction
 
