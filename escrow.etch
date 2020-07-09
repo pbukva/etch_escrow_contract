@@ -1,0 +1,211 @@
+persistent balance : UInt64;
+persistent buyer  : Address;
+persistent seller : Address;
+persistent escrow : Address;
+persistent start : UInt64;
+persistent buyerOk : Bool;
+persistent sellerOk: Bool;
+persistent settledAtBlock: UInt64;
+
+
+@init
+function init(owner: Address)
+    use balance;
+    use buyer;
+    use seller;
+    use escrow;
+    use start;
+    use buyerOk;
+    use sellerOk;
+    use settledAtBlock;
+
+    var context = getContext();
+    var tx: Transaction = context.transaction();
+    var transfers: Array<Transfer> = tx.transfers();
+    assert(transfers.count() == 2i32, "There must be 2 native transfers defined in the transaction.");
+
+    balance.set(0u64);
+    escrow.set(owner);
+    buyer.set(transfers[0].to());
+    seller.set(transfers[1].to());
+    //NOTE: Suggested check
+    //assert((buyer.get() != owner) && (seller.get() != owner) && (buyer.get() != seller.get()), "Owner, buyer and seller must be mutually different.");
+
+    start.set(context.block().blockNumber());
+    buyerOk.set(false);
+    sellerOk.set(false);
+    settledAtBlock.set(18446744073709551615u64);
+endfunction
+
+
+@action
+function accept()
+    verifyIsActive();
+
+    use balance;
+    use buyer;
+    use seller;
+    use start;
+    use buyerOk;
+    use sellerOk;
+    use settledAtBlock;
+
+    var context = getContext();
+    var tx: Transaction = context.transaction();
+    var from = tx.from();
+
+    if (from == buyer.get())
+        buyerOk.set(true);
+    else
+        if (from == seller.get())
+            sellerOk.set(true);
+        endif
+    endif
+
+    if (buyerOk.get() && sellerOk.get())
+        payBalance();
+    else
+        var releaseTimeout = 259200u64; // 259200[block/30xDay] = 30[Day]*24[h/Day]*60[m/h]*60[s/m] / 10[s/block]
+        var expirationBlock = start.get() + releaseTimeout;
+
+        // Freeze 30 days before release to buyer. The customer has to remember to call this method after freeze period.
+        if (buyerOk.get() && (!sellerOk(get)) && (context.block().blockNumber() > expirationBlock))
+            selfdestruct();
+        endif
+    endif
+endfunction
+
+
+@action
+function deposit()
+    verifyIsActive();
+
+    use balance;
+    use buyer;
+
+    var context = getContext();
+    var tx: Transaction = context.transaction();
+    var transfers: Array<Transfer> = tx.transfers();
+
+    assert(transfers.count() == 1i32, "There must be 1 native transfers defined in the transaction.");
+    assert(transfers[0].to() == tx.contractAddress(), "Transfer destination address must be contract address.");
+
+    if (tx.from() == buyer.get())
+        balance.set(balance.get() + transfers[0].amount());
+    endif
+endfunction
+
+
+@action
+function cancel()
+    verifyIsActive();
+
+    use balance;
+    use buyer;
+    use seller;
+    use buyerOk;
+    use sellerOk;
+    use settledAtBlock;
+
+    var context = getContext();
+    var tx: Transaction = context.transaction();
+    var from = tx.from();
+
+    if (from == buyer.get())
+        buyerOk.set(false);
+    else
+        if (from == seller.get())
+            sellerOk.set(false);
+        endif
+    endif
+
+    // if both buyer and seller would like to cancel, money is returned to buyer
+    if ((!buyerOk.get()) && (!sellerOk.get()))
+        selfdestruct();
+    endif
+endfunction
+
+
+@action
+function kill()
+    authoriseTx();
+    verifyIsActive();
+
+    selfdestruct();
+endfunction
+
+
+@query
+function balance() : UInt64
+    use balance;
+    return balance.get();
+endfunction
+
+
+@query
+function status() : StructuredData
+    use balance;
+    use buyer;
+    use seller;
+    use escrow;
+    use start;
+    use buyerOk;
+    use sellerOk;
+    use settledAtBlock;
+
+    var status = StructuredData();
+    status.set("balance", balance.get());
+    status.set("buyer", buyer.get());
+    status.set("seller", seller.get());
+    status.set("escrow", escrow.get());
+    status.set("start", start.get());
+    status.set("buyerOk", buyerOk.get());
+    status.set("sellerOk", sellerOk.get());
+    status.set("settledAtBlock", settledAtBlock.get());
+
+    return status;
+endfunction
+
+
+
+// ******   Private functions   *************************
+
+function payBalance()
+    // we are sending ourselves (contract creator) a fee
+    use seller
+    use escrow;
+
+    var fee = balance.get() / 100u64;
+    var amountPayable = balance.get() - fee;
+
+    transfer(escrow.get(), fee);
+    transfer(seller.get(), amountPayable);
+    balance.set(0u64);
+endfunction
+
+function selfdestruct()
+    use balance;
+    use buyer;
+    use settledAtBlock;
+
+    transfer(buyer.get(), balance.get());
+    balance.set(0u64);
+    settledAtBlock.set(getContext.block().blockNumber());
+endfunction
+
+function _isActive() : Bool
+    use settledAtBlock;
+    return (getContext.block().blockNumber() < settledAtBlock.get());
+endfunction
+
+function verifyIsActive()
+    use settledAtBlock;
+    assert(_isActive(), "Contract has been settled and is no more active.");
+endfunction
+
+function authoriseTx() : Transaction
+    use escrow;
+    var tx: Transaction = getContext().transaction();
+    assert(tx.from() == escrow.get(), "Tx sender must be owner address of the contract.");
+    return tx;
+endfunction
