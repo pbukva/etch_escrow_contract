@@ -12,7 +12,7 @@ from fetchai.ledger.api import LedgerApi
 from fetchai.ledger.api.contracts import ContractTxFactory
 from fet_tools.tools import deploy_contract, track_cost, connect_ledger,\
                             collect_private_keys_from_user_input,\
-                            encode_uint_b64, decode_uint_b64, \
+                            encode_bool, decode_bool, \
                             encode_fetch_address, decode_fetch_address, \
                             FetchTxDigest
 
@@ -48,8 +48,18 @@ class ContractStatus:
     balance: int = 0
     start: int = 0
     settledSinceBlock: int = 0xFFFFFFFFFFFFFFFF
-    buyerOk: bool = False
-    sellerOk: bool = False
+    sellerOk: bool = field(
+        default=None,
+        metadata=config(
+            encoder=encode_bool,
+            decoder=decode_bool,
+        ))
+    buyerOk: bool = field(
+        default=None,
+        metadata=config(
+            encoder=encode_bool,
+            decoder=decode_bool,
+        ))
 
 
 def deploy_contract_local(api: LedgerApi, args):
@@ -66,7 +76,7 @@ def deploy_contract_local(api: LedgerApi, args):
     print(f"contract address: {contract.address}")
     print(f"contract source code digest: {contract.digest}")
 
-    resp = input("\n\nAre contract deployment data above correct? [y/N]").lower()
+    resp = input("\n\nAre contract deployment data above correct? [y/N]: ").lower()
 
     if resp != "y":
         print("Exiting ...")
@@ -105,10 +115,17 @@ def query_contract_status(api: LedgerApi, args):
     ms, addr = query_contract_status_ex(api, args)
     print(f'Contract status of the contract at the {{{addr}}} address: {ms!s}')
 
+def query_deposited_balance(api: LedgerApi, args):
+    addr = Address(args.contract_address)
+    success, response = api.contracts.query(addr, "deposited_balance")
+    ms = None
+    if success and response and response["status"] == "success":
+        balance = response["result"]
+    print(f'Deposited balance of the contract: {balance} [Canonical FET]')
 
 def action_deposit(api: LedgerApi, args):
     fetch_contract_addr = Address(args.contract_address)
-    source_fetch_addr = Address(args.source_fetch_address)
+    source_fetch_addr = Address(args.from_address)
     signatories = collect_private_keys_from_user_input()
 
     tx = ContractTxFactory.action(source_fetch_addr,
@@ -130,7 +147,7 @@ def action_deposit(api: LedgerApi, args):
 
 def action_accept(api: LedgerApi, args):
     fetch_contract_addr = Address(args.contract_address)
-    source_fetch_addr = Address(args.source_fetch_address)
+    source_fetch_addr = Address(args.from_address)
     signatories = collect_private_keys_from_user_input()
 
     tx = ContractTxFactory.action(source_fetch_addr,
@@ -151,7 +168,7 @@ def action_accept(api: LedgerApi, args):
 
 def action_cancel(api: LedgerApi, args):
     fetch_contract_addr = Address(args.contract_address)
-    source_fetch_addr = Address(args.source_fetch_address)
+    source_fetch_addr = Address(args.from_address)
     signatories = collect_private_keys_from_user_input()
 
     tx = ContractTxFactory.action(source_fetch_addr,
@@ -172,7 +189,7 @@ def action_cancel(api: LedgerApi, args):
 
 def action_kill(api: LedgerApi, args):
     fetch_contract_addr = Address(args.contract_address)
-    source_fetch_addr = Address(args.source_fetch_address)
+    source_fetch_addr = Address(args.from_address)
     signatories = collect_private_keys_from_user_input()
 
     tx = ContractTxFactory.action(source_fetch_addr,
@@ -193,7 +210,7 @@ def action_kill(api: LedgerApi, args):
 
 def action_withdrawExcessBalance(api: LedgerApi, args):
     fetch_contract_addr = Address(args.contract_address)
-    source_fetch_addr = Address(args.source_fetch_address)
+    source_fetch_addr = Address(args.from_address)
     signatories = collect_private_keys_from_user_input()
 
     tx = ContractTxFactory.action(source_fetch_addr,
@@ -236,7 +253,8 @@ def action_withdrawExcessBalance(api: LedgerApi, args):
 
 
 def parse_arguments():
-    parser = ap.ArgumentParser(description='Interaction with Migration Etch contract for Native->ERC20 direction.')
+    parser = ap.ArgumentParser(description='Interaction with Escrow Etch contract')
+    parser.set_defaults(func=lambda *args: parser.print_help())
 
     parser.add_argument("--hostname", type=str, default="127.0.0.1", help="Hostname of the node")
     parser.add_argument("--port", type=int, default="8000", help="Port of the node")
@@ -252,45 +270,48 @@ def parse_arguments():
     parser_deploy.add_argument('--fee', type=int, default=600000,
                            help="Fee for Tx execution in [Canonical FET]")
     parser_deploy.add_argument("--transfers", type=str, action="extend", nargs="+",
-                        help="List of transfers, each transfer in form of coma separated vector DEST_FET_ADDR,AMOUNT \
-                              where AMOUNT is specified in Canonical FET unit")
+                        help="List of exactly 2 transfers - the first transfer' dest. address represents SELLER, the second transfer' dest. address represents BUYER. Each transfer in form of coma separated vector DEST_FET_ADDR,AMOUNT \
+                              where AMOUNT is specified in Canonical FET unit (**minimum** amount value is 1 [Canonical FET] (due to limitation in python fetch ledger api, not ledger itself)")
     parser_deploy.set_defaults(func=deploy_contract_local)
 
     parser_query = subparsers.add_parser('query', help='Query contract states')
     parser_query.add_argument('contract_address', type=str, help="Address where the contract is deployed")
     query_subparsers = parser_query.add_subparsers(help='sub-command help')
 
-    parser_query_migration_status = query_subparsers.add_parser('migration_status', help='Query contract migration status structure')
-    parser_query_migration_status.set_defaults(func=query_contract_status)
+    parser_query_deposited_balance = query_subparsers.add_parser('balance', help='Query value of deposited balance, prints in [Canonical FET]')
+    parser_query_deposited_balance.set_defaults(func=query_deposited_balance)
 
+    parser_query_contract_status = query_subparsers.add_parser('status', help='Query contract status structure')
+    parser_query_contract_status.set_defaults(func=query_contract_status)
 
     parser_action = subparsers.add_parser('action', help='Executes contract actions')
     parser_action.add_argument('contract_address', type=str, help="Address where the contract is deployed")
+    parser_action.add_argument('from_address', type=str,
+                                      help="Fetch native address of the party which is interacting with the contract (escrow, buyer, seller, etc. ...)")
     parser_action.add_argument('--fee', type=int, default=10000,
                                        help="Fee for Tx execution in [Canonical FET]")
     action_subparsers = parser_action.add_subparsers(help='sub-command help')
 
-    parser_action_migrate = action_subparsers.add_parser('deposit', help='Deposits funds to escrow contract')
-    parser_action_migrate.add_argument('source_fetch_address', type=str, help="Fetch native address where funds will be withdrawn FROM")
-    parser_action_migrate.add_argument('amount', type=int,
+    parser_action_deposit = action_subparsers.add_parser('deposit', help='Deposits funds to escrow contract')
+    parser_action_deposit.add_argument('amount', type=int,
                                        help="Amount of FET tokens to deposit in [Canonical FET]")
-    parser_action_migrate.set_defaults(func=action_deposit)
+    parser_action_deposit.set_defaults(func=action_deposit)
 
 
-    parser_action_migrate = action_subparsers.add_parser('accept', help='Accepts the terms in escrow')
-    parser_action_migrate.set_defaults(func=action_accept)
+    parser_action_accept = action_subparsers.add_parser('accept', help='Accepts the terms in escrow')
+    parser_action_accept.set_defaults(func=action_accept)
 
 
-    parser_action_migrate = action_subparsers.add_parser('cancel', help='Cancels participation in escrow contract, and returns locked balance funds to buyer IF both sides cancelled')
-    parser_action_migrate.set_defaults(func=action_cancel)
+    parser_action_cancel = action_subparsers.add_parser('cancel', help='Cancels participation in escrow contract, and returns locked balance funds to buyer IF both sides cancelled')
+    parser_action_cancel.set_defaults(func=action_cancel)
 
 
-    parser_action_migrate = action_subparsers.add_parser('kill', help='Kills escrow contract and refunds locked balnce funds to buyer')
-    parser_action_migrate.set_defaults(func=action_cancel)
+    parser_action_kill = action_subparsers.add_parser('kill', help='Kills escrow contract and refunds locked balnce funds to buyer')
+    parser_action_kill.set_defaults(func=action_cancel)
 
 
-    parser_action_migrate = action_subparsers.add_parser('withdraw-excess', help='Withdraws excess balance(= everything **above** locked balance) from contract and sends it to owner/escrow address.')
-    parser_action_migrate.set_defaults(func=action_withdrawExcessBalance)
+    parser_action_withdraw_excess = action_subparsers.add_parser('withdraw-excess', help='Withdraws excess balance(= everything **above** locked balance) from contract and sends it to owner/escrow address.')
+    parser_action_withdraw_excess.set_defaults(func=action_withdrawExcessBalance)
 
     return parser.parse_args(), parser
 
@@ -308,15 +329,9 @@ def main():
     print(f"Arguments = {args}")
 
     api = connect_ledger(network=args.network, host=args.hostname, port=args.port)
-    try:
-        print("=======================")
-        args.func(api, args)
-        print("=======================")
-    except AttributeError:
-        traceback.print_exc()
-        parser.print_help()
-        parser.exit()
-
+    print("=======================")
+    args.func(api, args)
+    print("=======================")
 
 if __name__ == '__main__':
     main()
