@@ -139,7 +139,7 @@ def action_deposit(api: LedgerApi, args):
     for signatory in signatories:
         tx.sign(signatory)
 
-    with track_cost(api.tokens, source_fetch_addr, "Cost of migration action Tx: "):
+    with track_cost(api.tokens, source_fetch_addr, "Cost of Tx: "):
         api.sync(api.submit_signed_tx(tx))
 
     print(f'Deposit has been successful')
@@ -160,7 +160,7 @@ def action_accept(api: LedgerApi, args):
     for signatory in signatories:
         tx.sign(signatory)
 
-    with track_cost(api.tokens, source_fetch_addr, "Cost of migration action Tx: "):
+    with track_cost(api.tokens, source_fetch_addr, "Cost of Tx: "):
         api.sync(api.submit_signed_tx(tx))
 
     print(f'Accept action has been successful')
@@ -181,7 +181,7 @@ def action_cancel(api: LedgerApi, args):
     for signatory in signatories:
         tx.sign(signatory)
 
-    with track_cost(api.tokens, source_fetch_addr, "Cost of migration action Tx: "):
+    with track_cost(api.tokens, source_fetch_addr, "Cost of Tx: "):
         api.sync(api.submit_signed_tx(tx))
 
     print(f'Cancel action has been successful')
@@ -202,7 +202,7 @@ def action_kill(api: LedgerApi, args):
     for signatory in signatories:
         tx.sign(signatory)
 
-    with track_cost(api.tokens, source_fetch_addr, "Cost of migration action Tx: "):
+    with track_cost(api.tokens, source_fetch_addr, "Cost of Tx: "):
         api.sync(api.submit_signed_tx(tx))
 
     print(f'Kill action has been successful')
@@ -223,7 +223,7 @@ def action_withdrawExcessBalance(api: LedgerApi, args):
     for signatory in signatories:
         tx.sign(signatory)
 
-    with track_cost(api.tokens, source_fetch_addr, "Cost of migration action Tx: "):
+    with track_cost(api.tokens, source_fetch_addr, "Cost of Tx: "):
         api.sync(api.submit_signed_tx(tx))
 
     print(f'Kill action has been successful')
@@ -232,7 +232,7 @@ def action_withdrawExcessBalance(api: LedgerApi, args):
 def action_withdrawExcessBalance(api: LedgerApi, args):
     ms, fetch_contract_addr = query_contract_status_ex(api, args)
     if ms is None:
-        raise RuntimeError("Unable to fetch MigrationStatus from the contract")
+        raise RuntimeError("Unable to fetch ContractStatus from the contract")
 
     signatories = collect_private_keys_from_user_input()
 
