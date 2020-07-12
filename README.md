@@ -40,16 +40,16 @@ Keys used for testing:
 # Deployment:
 
 ```shell script
-(etch_escrow_contract) bash-3.2$ ./contract_cli.py deploy escrow.etch WzXAme8fB7wpxXFAfvTpDgCQEVZjZcHt3UMnrP9t8vFUK3DN3 "qwerty" --transfers EytD7XFBDdw9J2KdaAmnpWKTwC6meKrFsCmzf1VZPV6vGSSWn,1 2s83Wma33nDUdfqRRoBjNXBN3RxXH7B45Zw55WNhgus2YECjh1,1
-Arguments = Namespace(contract_deployment_nonce='qwerty', contract_file='escrow.etch', contract_owner_address='WzXAme8fB7wpxXFAfvTpDgCQEVZjZcHt3UMnrP9t8vFUK3DN3', fee=600000, func=<function deploy_contract_local at 0x103eee9e0>, hostname='127.0.0.1', network=None, port=8000, transfers=['EytD7XFBDdw9J2KdaAmnpWKTwC6meKrFsCmzf1VZPV6vGSSWn,1', '2s83Wma33nDUdfqRRoBjNXBN3RxXH7B45Zw55WNhgus2YECjh1,1'])
+(etch_escrow_contract) bash-3.2$ ./contract_cli.py deploy escrow.etch WzXAme8fB7wpxXFAfvTpDgCQEVZjZcHt3UMnrP9t8vFUK3DN3 "qwerty5"
+Arguments = Namespace(contract_deployment_nonce='qwerty5', contract_file='escrow.etch', contract_owner_address='WzXAme8fB7wpxXFAfvTpDgCQEVZjZcHt3UMnrP9t8vFUK3DN3', fee=600000, func=<function deploy_contract_local at 0x1019f4e60>, hostname='127.0.0.1', network=None, port=8000)
 =======================
 WARNING:root:Etch parsing failed, shard masks will be set to wildcard
-WARNING:root:No terminal defined for '(' at line 70 col 30
+WARNING:root:No terminal defined for '_' at line 20 col 21
 
-        if (buyerOk.get() && (!sellerOk.get()) && (context.block().bl
-                             ^
+function initialise(_seller: Address, _buyer: Address)
+                    ^
 
-Expecting: {'NUMBER', 'PRE_UNARY', 'STRING_LITERAL', 'NAME', 'FLOAT_TYPE', 'FIXED_TYPE', 'BASIC_TYPE'}
+Expecting: {'RPAR', 'NAME'}
 
 contract source code:
 persistent deposited_balance : UInt64;
@@ -63,29 +63,35 @@ persistent settledSinceBlock: UInt64;
 
 
 @init
-function init(owner: Address)
+function constructor(owner: Address)
+    use escrow;
+    // Intentionally not setting values for remaining
+    escrow.set(owner);
+endfunction
+
+
+@action
+function initialise(_seller: Address, _buyer: Address)
+    assert(!isInitialised(), "Contract has been already initialised.");
+    authoriseTx();
+
     use deposited_balance;
+    //use escrow;
     use buyer;
     use seller;
-    use escrow;
     use start;
     use buyerOk;
     use sellerOk;
     use settledSinceBlock;
 
-    var context = getContext();
-    var tx: Transaction = context.transaction();
-    var transfers: Array<Transfer> = tx.transfers();
-    assert(transfers.count() == 2i32, "There must be 2 native transfers defined in the transaction.");
+    assert((_seller != null) && (_buyer != null), "Provided address of seller and/or buyer is null reference.");
+    seller.set(_seller);
+    buyer.set(_buyer);
+    //NOTE: Suggested check
+    //assert((buyer.get() != escrow.get()) && (seller.get() != escrow.get()) && (buyer.get() != seller.get()), "Owner, buyer and seller must be mutually different.");
 
     deposited_balance.set(0u64);
-    escrow.set(owner);
-    seller.set(transfers[0].to());
-    buyer.set(transfers[1].to());
-    //NOTE: Suggested check
-    //assert((buyer.get() != owner) && (seller.get() != owner) && (buyer.get() != seller.get()), "Owner, buyer and seller must be mutually different.");
-
-    start.set(context.block().blockNumber());
+    start.set(getContext().block().blockNumber());
     buyerOk.set(false);
     sellerOk.set(false);
     settledSinceBlock.set(18446744073709551615u64);
@@ -218,14 +224,16 @@ function status() : StructuredData
     use settledSinceBlock;
 
     var status = StructuredData();
-    status.set("deposited_balance", deposited_balance.get());
-    status.set("buyer", buyer.get());
-    status.set("seller", seller.get());
     status.set("escrow", escrow.get());
-    status.set("start", start.get());
-    status.set("buyerOk", toString(buyerOk.get()));
-    status.set("sellerOk", toString(sellerOk.get()));
-    status.set("settledSinceBlock", settledSinceBlock.get());
+    if (isInitialised())
+        status.set("deposited_balance", deposited_balance.get());
+        status.set("buyer", buyer.get());
+        status.set("seller", seller.get());
+        status.set("start", start.get());
+        status.set("buyerOk", toString(buyerOk.get()));
+        status.set("sellerOk", toString(sellerOk.get()));
+        status.set("settledSinceBlock", settledSinceBlock.get());
+    endif
 
     return status;
 endfunction
@@ -262,12 +270,18 @@ function selfdestruct()
     settledSinceBlock.set(getContext().block().blockNumber());
 endfunction
 
+function isInitialised() : Bool
+    use seller;
+    return (seller.get(null) != null);
+endfunction
+
 function isActive() : Bool
     use settledSinceBlock;
     return (getContext().block().blockNumber() < settledSinceBlock.get());
 endfunction
 
 function verifyIsActive()
+    assert(isInitialised(), "Contract has not been initialised yet.");
     assert(isActive(), "Contract has been settled and is no more active.");
 endfunction
 
@@ -281,121 +295,167 @@ endfunction
 
 
 owner address: WzXAme8fB7wpxXFAfvTpDgCQEVZjZcHt3UMnrP9t8vFUK3DN3
-nonce: cXdlcnR5
-contract address: 2Sf1y3ystCKUNsmgPr2HUqxkrkDKXJgE3sgu82BDT6sEDnTdQ1
-contract source code digest: 8f31cbf0551175353c5060619638f7e127f07af4c4b4972b53f125ecca61264e
+nonce: cXdlcnR5NQ==
+contract address: 2bkAE3EzwaBFnpuYa2RsnWiQHc67SLfVa1MCiDfQcrfWcywkLG
+contract source code digest: c8887175742f83f0c5b908437f72958716cda0ecb20a5323718566bc58340196
 
 
 Are contract deployment data above correct? [y/N]: y
-Transfers:
-Dest. address {EytD7XFBDdw9J2KdaAmnpWKTwC6meKrFsCmzf1VZPV6vGSSWn}: amount=1 [Canonical FET]
-Dest. address {2s83Wma33nDUdfqRRoBjNXBN3RxXH7B45Zw55WNhgus2YECjh1}: amount=1 [Canonical FET]
-
-
-Are transfers correct? [y/N]: y
 Private key for signee (hex or base64):
 Added new signatory[0] with address WzXAme8fB7wpxXFAfvTpDgCQEVZjZcHt3UMnrP9t8vFUK3DN3
 
 Continue with next key? [y/N]:
 WARNING:root:Defaulting to wildcard shard mask as none supplied
-Cost of creation: -11750 TOK
+Cost of creation: -12268 TOK
 Contract has been successfully deployed.
 =======================
 (etch_escrow_contract) bash-3.2$
 ```
-
-# Query contract Status structure:
+# Query contract Status structure BEFORE initialisation:
 ```shell script
-(etch_escrow_contract) bash-3.2$ ./contract_cli.py query 2Sf1y3ystCKUNsmgPr2HUqxkrkDKXJgE3sgu82BDT6sEDnTdQ1 status
-Arguments = Namespace(contract_address='2Sf1y3ystCKUNsmgPr2HUqxkrkDKXJgE3sgu82BDT6sEDnTdQ1', func=<function query_contract_status at 0x104749290>, hostname='127.0.0.1', network=None, port=8000)
+(etch_escrow_contract) bash-3.2$ ./contract_cli.py query 2bkAE3EzwaBFnpuYa2RsnWiQHc67SLfVa1MCiDfQcrfWcywkLG status
+Arguments = Namespace(contract_address='2bkAE3EzwaBFnpuYa2RsnWiQHc67SLfVa1MCiDfQcrfWcywkLG', func=<function query_contract_status at 0x1057123b0>, hostname='127.0.0.1', network=None, port=8000)
 =======================
-Contract status of the contract at the {2Sf1y3ystCKUNsmgPr2HUqxkrkDKXJgE3sgu82BDT6sEDnTdQ1} address: ContractStatus(buyer=2s83Wma33nDUdfqRRoBjNXBN3RxXH7B45Zw55WNhgus2YECjh1, seller=EytD7XFBDdw9J2KdaAmnpWKTwC6meKrFsCmzf1VZPV6vGSSWn, escrow=WzXAme8fB7wpxXFAfvTpDgCQEVZjZcHt3UMnrP9t8vFUK3DN3, balance=0, start=3964, settledSinceBlock=-1, sellerOk=False, buyerOk=False)
+Contract status of the contract at the {2bkAE3EzwaBFnpuYa2RsnWiQHc67SLfVa1MCiDfQcrfWcywkLG} address: ContractStatus(buyer=None, seller=None, escrow=WzXAme8fB7wpxXFAfvTpDgCQEVZjZcHt3UMnrP9t8vFUK3DN3, balance=None, start=None, settledSinceBlock=None, sellerOk=None, buyerOk=None)
 =======================
 (etch_escrow_contract) bash-3.2$
 ```
 
-# Query contract deposited balance:
+# Initialise contract:
 ```shell script
-(etch_escrow_contract) bash-3.2$ ./contract_cli.py query 2Sf1y3ystCKUNsmgPr2HUqxkrkDKXJgE3sgu82BDT6sEDnTdQ1 balance
-Arguments = Namespace(contract_address='2Sf1y3ystCKUNsmgPr2HUqxkrkDKXJgE3sgu82BDT6sEDnTdQ1', func=<function query_deposited_balance at 0x10e5aa320>, hostname='127.0.0.1', network=None, port=8000)
+(etch_escrow_contract) bash-3.2$ ./contract_cli.py action 2bkAE3EzwaBFnpuYa2RsnWiQHc67SLfVa1MCiDfQcrfWcywkLG WzXAme8fB7wpxXFAfvTpDgCQEVZjZcHt3UMnrP9t8vFUK3DN3 initialise EytD7XFBDdw9J2KdaAmnpWKTwC6meKrFsCmzf1VZPV6vGSSWn 2s83Wma33nDUdfqRRoBjNXBN3RxXH7B45Zw55WNhgus2YECjh1
+Arguments = Namespace(buyer='2s83Wma33nDUdfqRRoBjNXBN3RxXH7B45Zw55WNhgus2YECjh1', contract_address='2bkAE3EzwaBFnpuYa2RsnWiQHc67SLfVa1MCiDfQcrfWcywkLG', fee=10000, from_address='WzXAme8fB7wpxXFAfvTpDgCQEVZjZcHt3UMnrP9t8vFUK3DN3', func=<function action_initialise at 0x1110a14d0>, hostname='127.0.0.1', network=None, port=8000, seller='EytD7XFBDdw9J2KdaAmnpWKTwC6meKrFsCmzf1VZPV6vGSSWn')
 =======================
-Deposited balance of the contract: 0 [Canonical FET]
-=======================
-(etch_escrow_contract) bash-3.2$
-```
+Private key for signee (hex or base64):
+Added new signatory[0] with address WzXAme8fB7wpxXFAfvTpDgCQEVZjZcHt3UMnrP9t8vFUK3DN3
 
-# Execute `Deposit`
+Continue with next key? [y/N]:
+WARNING:root:Defaulting to wildcard shard mask as none supplied
+Cost of Tx: -188 TOK
+Initialise has been successful
+=======================
+```
+* Query contract Status structure **AFTER** initialisation:
+  ```shell script
+  (etch_escrow_contract) bash-3.2$ ./contract_cli.py query 2bkAE3EzwaBFnpuYa2RsnWiQHc67SLfVa1MCiDfQcrfWcywkLG status
+  Arguments = Namespace(contract_address='2bkAE3EzwaBFnpuYa2RsnWiQHc67SLfVa1MCiDfQcrfWcywkLG', func=<function query_contract_status at 0x1045a83b0>, hostname='127.0.0.1', network=None, port=8000)
+  =======================
+  Contract status of the contract at the {2bkAE3EzwaBFnpuYa2RsnWiQHc67SLfVa1MCiDfQcrfWcywkLG} address: ContractStatus(buyer=2s83Wma33nDUdfqRRoBjNXBN3RxXH7B45Zw55WNhgus2YECjh1, seller=EytD7XFBDdw9J2KdaAmnpWKTwC6meKrFsCmzf1VZPV6vGSSWn, escrow=WzXAme8fB7wpxXFAfvTpDgCQEVZjZcHt3UMnrP9t8vFUK3DN3, balance=0, start=35148, settledSinceBlock=-1, sellerOk=False, buyerOk=False)
+  =======================
+  (etch_escrow_contract) bash-3.2$
+  ```
+* Query contract Balance **AFTER** initialisation:
+  > NOTE: Querying BALANCE will **FAIL** when executed **BEFORE** contract has been initialised
+  ```shell script
+  (etch_escrow_contract) bash-3.2$ ./contract_cli.py query 2bkAE3EzwaBFnpuYa2RsnWiQHc67SLfVa1MCiDfQcrfWcywkLG balance
+  Arguments = Namespace(contract_address='2bkAE3EzwaBFnpuYa2RsnWiQHc67SLfVa1MCiDfQcrfWcywkLG', func=<function query_deposited_balance at 0x10dd37440>, hostname='127.0.0.1', network=None, port=8000)
+  =======================
+  Deposited balance of the contract: 0 [Canonical FET]
+  =======================
+  (etch_escrow_contract) bash-3.2$
+  ```
+
+# Execute `Deposit` by **BUYER** (see the 2nd address):
 ```shell script
-(etch_escrow_contract) bash-3.2$ ./contract_cli.py action 2Sf1y3ystCKUNsmgPr2HUqxkrkDKXJgE3sgu82BDT6sEDnTdQ1 2s83Wma33nDUdfqRRoBjNXBN3RxXH7B45Zw55WNhgus2YECjh1 deposit 1000
-Arguments = Namespace(amount=1000, contract_address='2Sf1y3ystCKUNsmgPr2HUqxkrkDKXJgE3sgu82BDT6sEDnTdQ1', fee=10000, from_address='2s83Wma33nDUdfqRRoBjNXBN3RxXH7B45Zw55WNhgus2YECjh1', func=<function action_deposit at 0x107ade3b0>, hostname='127.0.0.1', network=None, port=8000)
+(etch_escrow_contract) bash-3.2$ ./contract_cli.py action 2bkAE3EzwaBFnpuYa2RsnWiQHc67SLfVa1MCiDfQcrfWcywkLG 2s83Wma33nDUdfqRRoBjNXBN3RxXH7B45Zw55WNhgus2YECjh1 deposit 1000
+Arguments = Namespace(amount=1000, contract_address='2bkAE3EzwaBFnpuYa2RsnWiQHc67SLfVa1MCiDfQcrfWcywkLG', fee=10000, from_address='2s83Wma33nDUdfqRRoBjNXBN3RxXH7B45Zw55WNhgus2YECjh1', func=<function action_deposit at 0x10d399560>, hostname='127.0.0.1', network=None, port=8000)
 =======================
 Private key for signee (hex or base64):
 Added new signatory[0] with address 2s83Wma33nDUdfqRRoBjNXBN3RxXH7B45Zw55WNhgus2YECjh1
 
 Continue with next key? [y/N]:
 WARNING:root:Defaulting to wildcard shard mask as none supplied
-Cost of migration action Tx: -1017 TOK
+Cost of Tx: -1017 TOK
 Deposit has been successful
 =======================
 (etch_escrow_contract) bash-3.2$
 ```
-```shell script
-(etch_escrow_contract) bash-3.2$ ./contract_cli.py query 2Sf1y3ystCKUNsmgPr2HUqxkrkDKXJgE3sgu82BDT6sEDnTdQ1 balance
-Arguments = Namespace(contract_address='2Sf1y3ystCKUNsmgPr2HUqxkrkDKXJgE3sgu82BDT6sEDnTdQ1', func=<function query_deposited_balance at 0x108591320>, hostname='127.0.0.1', network=None, port=8000)
-=======================
-Deposited balance of the contract: 1000 [Canonical FET]
-=======================
-(etch_escrow_contract) bash-3.2$
-```
+* Query contract Status structure:
+    ```shell script
+    (etch_escrow_contract) bash-3.2$ ./contract_cli.py query 2bkAE3EzwaBFnpuYa2RsnWiQHc67SLfVa1MCiDfQcrfWcywkLG status
+    Arguments = Namespace(contract_address='2bkAE3EzwaBFnpuYa2RsnWiQHc67SLfVa1MCiDfQcrfWcywkLG', func=<function query_contract_status at 0x108d863b0>, hostname='127.0.0.1', network=None, port=8000)
+    =======================
+    Contract status of the contract at the {2bkAE3EzwaBFnpuYa2RsnWiQHc67SLfVa1MCiDfQcrfWcywkLG} address: ContractStatus(buyer=2s83Wma33nDUdfqRRoBjNXBN3RxXH7B45Zw55WNhgus2YECjh1, seller=EytD7XFBDdw9J2KdaAmnpWKTwC6meKrFsCmzf1VZPV6vGSSWn, escrow=WzXAme8fB7wpxXFAfvTpDgCQEVZjZcHt3UMnrP9t8vFUK3DN3, balance=1000, start=35148, settledSinceBlock=-1, sellerOk=False, buyerOk=False)
+    =======================
+    (etch_escrow_contract) bash-3.2$
+    ```
+* Query contract Balance:
+    ```shell script
+    (etch_escrow_contract) bash-3.2$ ./contract_cli.py query 2bkAE3EzwaBFnpuYa2RsnWiQHc67SLfVa1MCiDfQcrfWcywkLG balance
+    Arguments = Namespace(contract_address='2bkAE3EzwaBFnpuYa2RsnWiQHc67SLfVa1MCiDfQcrfWcywkLG', func=<function query_deposited_balance at 0x10872b440>, hostname='127.0.0.1', network=None, port=8000)
+    =======================
+    Deposited balance of the contract: 1000 [Canonical FET]
+    =======================
+    (etch_escrow_contract) bash-3.2$
+    ```
 
-# Execute `Accept` by BUYER
+# Execute `Accept` by **BUYER** (see the 2nd address)
 ```shell script
-(etch_escrow_contract) bash-3.2$ ./contract_cli.py action 2Sf1y3ystCKUNsmgPr2HUqxkrkDKXJgE3sgu82BDT6sEDnTdQ1 2s83Wma33nDUdfqRRoBjNXBN3RxXH7B45Zw55WNhgus2YECjh1 accept
-Arguments = Namespace(contract_address='2Sf1y3ystCKUNsmgPr2HUqxkrkDKXJgE3sgu82BDT6sEDnTdQ1', fee=10000, from_address='2s83Wma33nDUdfqRRoBjNXBN3RxXH7B45Zw55WNhgus2YECjh1', func=<function action_accept at 0x106a14440>, hostname='127.0.0.1', network=None, port=8000)
+(etch_escrow_contract) bash-3.2$ ./contract_cli.py action 2bkAE3EzwaBFnpuYa2RsnWiQHc67SLfVa1MCiDfQcrfWcywkLG 2s83Wma33nDUdfqRRoBjNXBN3RxXH7B45Zw55WNhgus2YECjh1 accept
+Arguments = Namespace(contract_address='2bkAE3EzwaBFnpuYa2RsnWiQHc67SLfVa1MCiDfQcrfWcywkLG', fee=10000, from_address='2s83Wma33nDUdfqRRoBjNXBN3RxXH7B45Zw55WNhgus2YECjh1', func=<function action_accept at 0x10282c5f0>, hostname='127.0.0.1', network=None, port=8000)
 =======================
 Private key for signee (hex or base64):
 Added new signatory[0] with address 2s83Wma33nDUdfqRRoBjNXBN3RxXH7B45Zw55WNhgus2YECjh1
 
 Continue with next key? [y/N]:
 WARNING:root:Defaulting to wildcard shard mask as none supplied
-Cost of migration action Tx: -2 TOK
+Cost of Tx: -2 TOK
 Accept action has been successful
 =======================
 (etch_escrow_contract) bash-3.2$
 ```
-```shell script
-(etch_escrow_contract) bash-3.2$ ./contract_cli.py query 2Sf1y3ystCKUNsmgPr2HUqxkrkDKXJgE3sgu82BDT6sEDnTdQ1 status
-Arguments = Namespace(contract_address='2Sf1y3ystCKUNsmgPr2HUqxkrkDKXJgE3sgu82BDT6sEDnTdQ1', func=<function query_contract_status at 0x107b14290>, hostname='127.0.0.1', network=None, port=8000)
-=======================
-Contract status of the contract at the {2Sf1y3ystCKUNsmgPr2HUqxkrkDKXJgE3sgu82BDT6sEDnTdQ1} address: ContractStatus(buyer=2s83Wma33nDUdfqRRoBjNXBN3RxXH7B45Zw55WNhgus2YECjh1, seller=EytD7XFBDdw9J2KdaAmnpWKTwC6meKrFsCmzf1VZPV6vGSSWn, escrow=WzXAme8fB7wpxXFAfvTpDgCQEVZjZcHt3UMnrP9t8vFUK3DN3, balance=0, start=3964, settledSinceBlock=-1, sellerOk=False, buyerOk=True)
-=======================
-(etch_escrow_contract) bash-3.2$
-```
+* Query contract Status structure:
+  ```shell script
+  (etch_escrow_contract) bash-3.2$ ./contract_cli.py query 2bkAE3EzwaBFnpuYa2RsnWiQHc67SLfVa1MCiDfQcrfWcywkLG status
+  Arguments = Namespace(contract_address='2bkAE3EzwaBFnpuYa2RsnWiQHc67SLfVa1MCiDfQcrfWcywkLG', func=<function query_contract_status at 0x110b193b0>, hostname='127.0.0.1', network=None, port=8000)
+  =======================
+  Contract status of the contract at the {2bkAE3EzwaBFnpuYa2RsnWiQHc67SLfVa1MCiDfQcrfWcywkLG} address: ContractStatus(buyer=2s83Wma33nDUdfqRRoBjNXBN3RxXH7B45Zw55WNhgus2YECjh1, seller=EytD7XFBDdw9J2KdaAmnpWKTwC6meKrFsCmzf1VZPV6vGSSWn, escrow=WzXAme8fB7wpxXFAfvTpDgCQEVZjZcHt3UMnrP9t8vFUK3DN3, balance=1000, start=35148, settledSinceBlock=-1, sellerOk=False, buyerOk=True)
+  =======================
+  (etch_escrow_contract) bash-3.2$
+  ```
+* Query contract Balance:
+  ```shell script
+  (etch_escrow_contract) bash-3.2$ ./contract_cli.py query 2bkAE3EzwaBFnpuYa2RsnWiQHc67SLfVa1MCiDfQcrfWcywkLG balance
+  Arguments = Namespace(contract_address='2bkAE3EzwaBFnpuYa2RsnWiQHc67SLfVa1MCiDfQcrfWcywkLG', func=<function query_deposited_balance at 0x10afde440>, hostname='127.0.0.1', network=None, port=8000)
+  =======================
+  Deposited balance of the contract: 1000 [Canonical FET]
+  =======================
+  (etch_escrow_contract) bash-3.2$
+  ```
 
-# Execute `Accept` by SELLER
-As continuation of previous steps from above), this will result to finalising
+# Execute `Accept` by **SELLER** (see the 2nd address)
+As continuation of previous steps from above), this will result in to **finalising**
 the escrow contract and so transferring balance to seller & fee to escrow address.
 Note the `settledSinceBlock` in the contract status.
-
 ```shell script
-(etch_escrow_contract) bash-3.2$ ./contract_cli.py action 2Sf1y3ystCKUNsmgPr2HUqxkrkDKXJgE3sgu82BDT6sEDnTdQ1 EytD7XFBDdw9J2KdaAmnpWKTwC6meKrFsCmzf1VZPV6vGSSWn accept
-Arguments = Namespace(contract_address='2Sf1y3ystCKUNsmgPr2HUqxkrkDKXJgE3sgu82BDT6sEDnTdQ1', fee=10000, from_address='EytD7XFBDdw9J2KdaAmnpWKTwC6meKrFsCmzf1VZPV6vGSSWn', func=<function action_accept at 0x110764440>, hostname='127.0.0.1', network=None, port=8000)
+(etch_escrow_contract) bash-3.2$ ./contract_cli.py action 2bkAE3EzwaBFnpuYa2RsnWiQHc67SLfVa1MCiDfQcrfWcywkLG EytD7XFBDdw9J2KdaAmnpWKTwC6meKrFsCmzf1VZPV6vGSSWn accept
+Arguments = Namespace(contract_address='2bkAE3EzwaBFnpuYa2RsnWiQHc67SLfVa1MCiDfQcrfWcywkLG', fee=10000, from_address='EytD7XFBDdw9J2KdaAmnpWKTwC6meKrFsCmzf1VZPV6vGSSWn', func=<function action_accept at 0x1040c65f0>, hostname='127.0.0.1', network=None, port=8000)
 =======================
 Private key for signee (hex or base64):
 Added new signatory[0] with address EytD7XFBDdw9J2KdaAmnpWKTwC6meKrFsCmzf1VZPV6vGSSWn
 
 Continue with next key? [y/N]:
 WARNING:root:Defaulting to wildcard shard mask as none supplied
-Cost of migration action Tx: 848 TOK
+Cost of Tx: 848 TOK
 Accept action has been successful
 =======================
 (etch_escrow_contract) bash-3.2$
 ```
-```shell script
-(etch_escrow_contract) bash-3.2$ ./contract_cli.py query 2Sf1y3ystCKUNsmgPr2HUqxkrkDKXJgE3sgu82BDT6sEDnTdQ1 status
-Arguments = Namespace(contract_address='2Sf1y3ystCKUNsmgPr2HUqxkrkDKXJgE3sgu82BDT6sEDnTdQ1', func=<function query_contract_status at 0x10595e290>, hostname='127.0.0.1', network=None, port=8000)
-=======================
-Contract status of the contract at the {2Sf1y3ystCKUNsmgPr2HUqxkrkDKXJgE3sgu82BDT6sEDnTdQ1} address: ContractStatus(buyer=2s83Wma33nDUdfqRRoBjNXBN3RxXH7B45Zw55WNhgus2YECjh1, seller=EytD7XFBDdw9J2KdaAmnpWKTwC6meKrFsCmzf1VZPV6vGSSWn, escrow=WzXAme8fB7wpxXFAfvTpDgCQEVZjZcHt3UMnrP9t8vFUK3DN3, balance=0, start=3964, settledSinceBlock=4106, sellerOk=True, buyerOk=True)
-=======================
-(etch_escrow_contract) bash-3.2$
-```
+* Query contract Status structure:
+  ```shell script
+  (etch_escrow_contract) bash-3.2$ ./contract_cli.py query 2bkAE3EzwaBFnpuYa2RsnWiQHc67SLfVa1MCiDfQcrfWcywkLG status
+  Arguments = Namespace(contract_address='2bkAE3EzwaBFnpuYa2RsnWiQHc67SLfVa1MCiDfQcrfWcywkLG', func=<function query_contract_status at 0x109df33b0>, hostname='127.0.0.1', network=None, port=8000)
+  =======================
+  Contract status of the contract at the {2bkAE3EzwaBFnpuYa2RsnWiQHc67SLfVa1MCiDfQcrfWcywkLG} address: ContractStatus(buyer=2s83Wma33nDUdfqRRoBjNXBN3RxXH7B45Zw55WNhgus2YECjh1, seller=EytD7XFBDdw9J2KdaAmnpWKTwC6meKrFsCmzf1VZPV6vGSSWn, escrow=WzXAme8fB7wpxXFAfvTpDgCQEVZjZcHt3UMnrP9t8vFUK3DN3, balance=0, start=35148, settledSinceBlock=35466, sellerOk=True, buyerOk=True)
+  =======================
+  (etch_escrow_contract) bash-3.2$
+  ```
+* Query contract Balance:
+  ```shell script
+  (etch_escrow_contract) bash-3.2$ ./contract_cli.py query 2bkAE3EzwaBFnpuYa2RsnWiQHc67SLfVa1MCiDfQcrfWcywkLG balance
+  Arguments = Namespace(contract_address='2bkAE3EzwaBFnpuYa2RsnWiQHc67SLfVa1MCiDfQcrfWcywkLG', func=<function query_deposited_balance at 0x109c51440>, hostname='127.0.0.1', network=None, port=8000)
+  =======================
+  Deposited balance of the contract: 0 [Canonical FET]
+  =======================
+  (etch_escrow_contract) bash-3.2$
+  ```

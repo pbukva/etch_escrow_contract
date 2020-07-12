@@ -9,29 +9,35 @@ persistent settledSinceBlock: UInt64;
 
 
 @init
-function init(owner: Address)
+function constructor(owner: Address)
+    use escrow;
+    // Intentionally not setting values for remaining
+    escrow.set(owner);
+endfunction
+
+
+@action
+function initialise(_seller: Address, _buyer: Address)
+    assert(!isInitialised(), "Contract has been already initialised.");
+    authoriseTx();
+
     use deposited_balance;
+    //use escrow;
     use buyer;
     use seller;
-    use escrow;
     use start;
     use buyerOk;
     use sellerOk;
     use settledSinceBlock;
 
-    var context = getContext();
-    var tx: Transaction = context.transaction();
-    var transfers: Array<Transfer> = tx.transfers();
-    assert(transfers.count() == 2i32, "There must be 2 native transfers defined in the transaction.");
+    assert((_seller != null) && (_buyer != null), "Provided address of seller and/or buyer is null reference.");
+    seller.set(_seller);
+    buyer.set(_buyer);
+    //NOTE: Suggested check
+    //assert((buyer.get() != escrow.get()) && (seller.get() != escrow.get()) && (buyer.get() != seller.get()), "Owner, buyer and seller must be mutually different.");
 
     deposited_balance.set(0u64);
-    escrow.set(owner);
-    seller.set(transfers[0].to());
-    buyer.set(transfers[1].to());
-    //NOTE: Suggested check
-    //assert((buyer.get() != owner) && (seller.get() != owner) && (buyer.get() != seller.get()), "Owner, buyer and seller must be mutually different.");
-
-    start.set(context.block().blockNumber());
+    start.set(getContext().block().blockNumber());
     buyerOk.set(false);
     sellerOk.set(false);
     settledSinceBlock.set(18446744073709551615u64);
@@ -164,14 +170,16 @@ function status() : StructuredData
     use settledSinceBlock;
 
     var status = StructuredData();
-    status.set("deposited_balance", deposited_balance.get());
-    status.set("buyer", buyer.get());
-    status.set("seller", seller.get());
     status.set("escrow", escrow.get());
-    status.set("start", start.get());
-    status.set("buyerOk", toString(buyerOk.get()));
-    status.set("sellerOk", toString(sellerOk.get()));
-    status.set("settledSinceBlock", settledSinceBlock.get());
+    if (isInitialised())
+        status.set("deposited_balance", deposited_balance.get());
+        status.set("buyer", buyer.get());
+        status.set("seller", seller.get());
+        status.set("start", start.get());
+        status.set("buyerOk", toString(buyerOk.get()));
+        status.set("sellerOk", toString(sellerOk.get()));
+        status.set("settledSinceBlock", settledSinceBlock.get());
+    endif
 
     return status;
 endfunction
@@ -208,12 +216,18 @@ function selfdestruct()
     settledSinceBlock.set(getContext().block().blockNumber());
 endfunction
 
+function isInitialised() : Bool
+    use seller;
+    return (seller.get(null) != null);
+endfunction
+
 function isActive() : Bool
     use settledSinceBlock;
     return (getContext().block().blockNumber() < settledSinceBlock.get());
 endfunction
 
 function verifyIsActive()
+    assert(isInitialised(), "Contract has not been initialised yet.");
     assert(isActive(), "Contract has been settled and is no more active.");
 endfunction
 

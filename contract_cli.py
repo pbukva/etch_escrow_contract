@@ -4,7 +4,7 @@ import argparse as ap
 import traceback
 from dataclasses import dataclass, field
 from dataclasses_json import dataclass_json, config
-from typing import Tuple
+from typing import Tuple, Optional
 
 from fetchai.ledger.crypto import Entity, Address
 from fetchai.ledger.contract import Contract
@@ -27,13 +27,13 @@ class ExtendAction(ap.Action):
 @dataclass_json
 @dataclass(order=True)
 class ContractStatus:
-    buyer: Address = field(
+    buyer: Optional[Address] = field(
         default=None,
         metadata=config(
             encoder=encode_fetch_address,
             decoder=decode_fetch_address,
         ))
-    seller: Address = field(
+    seller: Optional[Address] = field(
         default=None,
         metadata=config(
             encoder=encode_fetch_address,
@@ -45,16 +45,21 @@ class ContractStatus:
             encoder=encode_fetch_address,
             decoder=decode_fetch_address,
         ))
-    balance: int = 0
-    start: int = 0
-    settledSinceBlock: int = 0xFFFFFFFFFFFFFFFF
-    sellerOk: bool = field(
+    #deposited_balance: Optional[int] = None
+    balance: Optional[int] = field(
+        default=None,
+        metadata=config(
+            field_name="deposited_balance"
+        ))
+    start: Optional[int] = None
+    settledSinceBlock: Optional[int] = None # 0xFFFFFFFFFFFFFFFF
+    sellerOk: Optional[bool] = field(
         default=None,
         metadata=config(
             encoder=encode_bool,
             decoder=decode_bool,
         ))
-    buyerOk: bool = field(
+    buyerOk: Optional[bool] = field(
         default=None,
         metadata=config(
             encoder=encode_bool,
@@ -82,22 +87,23 @@ def deploy_contract_local(api: LedgerApi, args):
         print("Exiting ...")
         exit(-1)
 
-    transfers = parse_transfers(args)
-    if transfers:
-        print("Transfers:")
-        for address, amount in transfers:
-            print(f"Dest. address {{{address}}}: amount={amount} [Canonical FET]")
+    #transfers = parse_transfers(args)
+    #if transfers:
+    #    print("Transfers:")
+    #    for address, amount in transfers:
+    #        print(f"Dest. address {{{address}}}: amount={amount} [Canonical FET]")
 
-        resp = input("\n\nAre transfers correct? [y/N]: ").lower()
+    #    resp = input("\n\nAre transfers correct? [y/N]: ").lower()
 
-        if resp != "y":
-            print("Exiting ...")
-            exit(-1)
+    #    if resp != "y":
+    #        print("Exiting ...")
+    #        exit(-1)
 
     signatories = collect_private_keys_from_user_input()
 
     with track_cost(api.tokens, contract.owner, "Cost of creation: "):
-        api.sync(deploy_contract(api, contract, args.fee, signatories, transfers))
+        #api.sync(deploy_contract(api, contract, args.fee, signatories, transfers))
+        api.sync(deploy_contract(api, contract, args.fee, signatories))
 
     print("Contract has been successfully deployed.")
 
@@ -115,6 +121,7 @@ def query_contract_status(api: LedgerApi, args):
     ms, addr = query_contract_status_ex(api, args)
     print(f'Contract status of the contract at the {{{addr}}} address: {ms!s}')
 
+
 def query_deposited_balance(api: LedgerApi, args):
     addr = Address(args.contract_address)
     success, response = api.contracts.query(addr, "deposited_balance")
@@ -122,6 +129,30 @@ def query_deposited_balance(api: LedgerApi, args):
     if success and response and response["status"] == "success":
         balance = response["result"]
     print(f'Deposited balance of the contract: {balance} [Canonical FET]')
+
+
+def action_initialise(api: LedgerApi, args):
+    fetch_contract_addr = Address(args.contract_address)
+    source_fetch_addr = Address(args.from_address)
+    signatories = collect_private_keys_from_user_input()
+
+    tx = ContractTxFactory.action(source_fetch_addr,
+                                  fetch_contract_addr,
+                                  "initialise",
+                                  args.fee,
+                                  signatories,
+                                  Address(args.seller),
+                                  Address(args.buyer))
+
+    api.set_validity_period(tx)
+    for signatory in signatories:
+        tx.sign(signatory)
+
+    with track_cost(api.tokens, source_fetch_addr, "Cost of Tx: "):
+        api.sync(api.submit_signed_tx(tx))
+
+    print(f'Initialise has been successful')
+
 
 def action_deposit(api: LedgerApi, args):
     fetch_contract_addr = Address(args.contract_address)
@@ -269,9 +300,9 @@ def parse_arguments():
     parser_deploy.add_argument("contract_deployment_nonce", type=str, help="Nonce of the contract deployment")
     parser_deploy.add_argument('--fee', type=int, default=600000,
                            help="Fee for Tx execution in [Canonical FET]")
-    parser_deploy.add_argument("--transfers", type=str, action="extend", nargs="+",
-                        help="List of exactly 2 transfers - the first transfer' dest. address represents SELLER, the second transfer' dest. address represents BUYER. Each transfer in form of coma separated vector DEST_FET_ADDR,AMOUNT \
-                              where AMOUNT is specified in Canonical FET unit (**minimum** amount value is 1 [Canonical FET] (due to limitation in python fetch ledger api, not ledger itself)")
+    #parser_deploy.add_argument("--transfers", type=str, action="extend", nargs="+",
+    #                    help="List of exactly 2 transfers - the first transfer' dest. address represents SELLER, the second transfer' dest. address represents BUYER. Each transfer in form of coma separated vector DEST_FET_ADDR,AMOUNT \
+    #                          where AMOUNT is specified in Canonical FET unit (**minimum** amount value is 1 [Canonical FET] (due to limitation in python fetch ledger api, not ledger itself)")
     parser_deploy.set_defaults(func=deploy_contract_local)
 
     parser_query = subparsers.add_parser('query', help='Query contract states')
@@ -291,6 +322,13 @@ def parse_arguments():
     parser_action.add_argument('--fee', type=int, default=10000,
                                        help="Fee for Tx execution in [Canonical FET]")
     action_subparsers = parser_action.add_subparsers(help='sub-command help')
+
+    parser_action_deposit = action_subparsers.add_parser('initialise', help='Initialises the escrow contract, setting seller & buyer addresses and start block.')
+    parser_action_deposit.add_argument('seller', type=str,
+                                       help="FET Address of buyer")
+    parser_action_deposit.add_argument('buyer', type=str,
+                                       help="FET Address of seller")
+    parser_action_deposit.set_defaults(func=action_initialise)
 
     parser_action_deposit = action_subparsers.add_parser('deposit', help='Deposits funds to escrow contract')
     parser_action_deposit.add_argument('amount', type=int,

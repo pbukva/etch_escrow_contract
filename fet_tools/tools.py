@@ -274,7 +274,10 @@ def encode_fetch_address(value: Address) -> str:
     return str(value)
 
 
-def decode_bool(value: str) -> bool:
+def decode_bool(value: Optional[str]) -> bool:
+    if value is None:
+        return None
+
     low_value = value.lower()
     if low_value == "true":
         return True
@@ -284,5 +287,5 @@ def decode_bool(value: str) -> bool:
     raise ValueError(f'Value "{value}" can not be converted to boolean type')
 
 
-def encode_bool(value: bool) -> str:
-    return str(value).lower()
+def encode_bool(value: Optional[bool] ) -> str:
+    return str(value).lower() if value else None
