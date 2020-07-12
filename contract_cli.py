@@ -45,7 +45,11 @@ class ContractStatus:
             encoder=encode_fetch_address,
             decoder=decode_fetch_address,
         ))
-    balance: int = 0
+    balance: int = field(
+        default=0,
+        metadata=config(
+            field_name="deposited_balance"
+        ))
     start: int = 0
     settledSinceBlock: int = 0xFFFFFFFFFFFFFFFF
     sellerOk: bool = field(
